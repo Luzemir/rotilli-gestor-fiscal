@@ -1,0 +1,35 @@
+# Ambiente Virtual / Modules
+node_modules/
+.env
+.env.local
+.env.development
+.env.production
+
+# Diretórios temporários / Skills / Agentes
+.agent/
+data/
+scratch/
+
+# Build e compilação
+.next/
+dist/
+out/
+build/
+
+# Banco de dados e backups
+src/db/
+
+# Documentos de negócio (contratos, planilhas fiscais, specs internas) — nunca commitar
+Documentos/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Credenciais Streamlit (nunca commitar)
+.streamlit/secrets.toml
+
+# Outros
+.DS_Store
+*.log
