@@ -1,43 +1,75 @@
-# Project.md (Decision Log) - Rotilli Gestor Fiscal
+# Project.md (Decision Log) — Rotilli Gestor Fiscal
 
 ## Objetivo e Escopo
-Automatizar o cálculo do ICMS Substituição Tributária com base no Crédito Outorgado (Acordo Rotilli x Sefaz). 
-O sistema substituirá as macros de Excel (.xlsm) atuais por uma aplicação robusta, que importa notas fiscais (XML), processa a tabela da Anvisa (CEMED), aplica regras de negócio baseadas em EAN/NCM e gera relatórios (Original e Ajustado).
 
-## Fluxo Principal (Rota de Processamento)
+Automatizar o cálculo do ICMS Substituição Tributária com base no Crédito Outorgado
+(Termo de Acordo Rotilli × Sefaz/MS). O sistema substitui as macros de Excel (.xlsm)
+por um app web que importa NF-e (XML), consulta a tabela CMED da Anvisa, aplica as
+regras de classificação (MOD BC 0–5) e gera a planilha de apuração mensal.
 
-1. **Carga Inicial (One-time):**
-   - Criação do Banco de Dados (BD) de Produtos a partir do histórico já classificado nas planilhas (meses 06/2025 a 04/2026), focando na `tabela de produtos.xlsx`.
-   - Este DB conterá as listas (Positiva/Negativa/Neutra) e regras já definidas.
+> Detalhes operacionais, schema do banco, regras de negócio e armadilhas conhecidas:
+> ver `AGENTS.md` na raiz (mantido como fonte de verdade para continuidade).
 
-2. **Rotina Mensal (Automação):**
-   - **Download/Importação dos XMLs:** O usuário faz o input dos XMLs no sistema.
-   - **Verificação Primária:** O sistema analisa cada item da NFe buscando no BD de Produtos (via EAN/NCM).
-   - **Produto Novo:** Se não for encontrado, o sistema alerta o operador visualmente para que a classificação seja feita antes do fechamento.
-   - **Produto Existente e PMC:** Se o produto já existe e é da categoria PMC (0), o sistema consulta a tabela CEMED atual do mês. Se o valor PMC for diferente do cadastro, o sistema atualiza o PMC para o cálculo atual. Caso contrário, mantém o valor.
-   - **Geração:** O sistema aplica os cálculos (MVA/Normal/etc) e gera as planilhas/apurações (Original e Ajustada).
+---
 
-## Arquitetura e Stack Tecnológica
+## Decisões de Arquitetura
 
-- **Frontend / Interface:** Web App moderno utilizando **Next.js (React)** com **Tailwind CSS**.
-- **Backend / Processamento:** **Node.js** (integrado ao Next.js).
-- **Banco de Dados:** **PostgreSQL** via **Supabase** (para garantir que a "tabela de produtos" fique consolidada e imutável/segura) ou local.
-- **Deploy/Hospedagem:** **Vercel** (para o Web App) e Supabase (para o Banco).
+### D1 — Stack (revisada 2026-06, registrada 2026-07-07)
+**Decisão original (2026-06 início):** Next.js + Node + PostgreSQL/Supabase + Vercel.
+**Decisão vigente:** **Python + Streamlit + SQLite + Railway.**
+**Motivo da mudança:** todo o pipeline (parser XML, ETL CMED, geração de .xlsm com
+openpyxl) já estava em Python; Streamlit eliminou a necessidade de API separada e
+frontend próprio. SQLite é suficiente para o volume (1 empresa, ~milhares de
+registros/mês) e viaja como arquivo único entre ambientes (página Admin faz
+upload/download do banco).
 
-## Estrutura de Pastas
-```text
-/
-├── .agent/              # Diretório das skills (Bloqueado no .gitignore)
-├── .github/             # Actions e fluxos de CI/CD
-├── docs/                # Arquivos Markdown (.md), manuais e logs de decisão
-├── scripts/             # Scripts de carga (ex: inicialização da tabela de produtos)
-├── src/                 # Código-fonte principal
-│   ├── app/             # Rotas da interface (Frontend)
-│   ├── components/      # Componentes (UI)
-│   ├── core/            # Lógica de negócio, leitura de XML e validação de BD
-│   ├── db/              # Esquemas e acesso a dados
-│   └── tests/           # Testes
-├── assets/              # Imagens e ícones
-├── data/                # XMLs temporários e CEMED (Bloqueado no .gitignore)
-└── documentos/          # Documentação legado e negócio já existente
-```
+### D2 — Competência da importação (2026-06-16, revisada 2026-07-06)
+A competência dos XMLs é definida **pelo operador** (seletor Ano/Mês na importação),
+não pela data de emissão de cada nota. NF-e emitida no fim do mês anterior mas
+recebida no lote atual entra na apuração do mês atual. (Antes era pelo nome da pasta
+`AAAA-MM`; o seletor substituiu isso quando a importação virou upload web.)
+
+### D3 — Snapshot de apuração (2026-06-16)
+Cada item importado é congelado em `nfe_item_apuracao` (PMC/MVA/MOD do momento da
+importação). A planilha é sempre regenerada do banco (acumulado da competência),
+clonando o template — reimportar o mesmo XML sobrescreve a mesma linha (idempotente).
+
+### D4 — PMC histórico vs CMED (2026-06-16)
+A coluna Y (PMC) da planilha é SEMPRE o PMC histórico do produto. O valor pesquisado
+na CMED vai em coluna própria (AN) com a diferença em AO — a CMED nunca sobrescreve
+o histórico automaticamente.
+
+### D5 — Fórmulas vivas na planilha (2026-06-16)
+As 8+ fórmulas de cálculo (AD–AK, AO, AP) são escritas como fórmula Excel literal
+(replicadas da planilha histórica), não como valores calculados em Python — o
+operador confere e o Excel recalcula.
+
+### D6 — Autenticação própria + sessão por token (2026-07-02)
+Login por tabela `usuarios` no SQLite (gestão via página Admin) com fallback em env
+vars. Sessão persistida em tabela `sessoes` + token na URL (`?s=`) para sobreviver a
+F5 — Streamlit não tem sessão nativa entre reloads.
+
+### D7 — Reset do histórico Git (2026-07-06)
+O repositório esteve público com documentos fiscais e contratuais reais commitados.
+Histórico integralmente reescrito (commit único), `Documentos/` adicionada ao
+`.gitignore`, tag antiga removida do remoto. Backup do histórico antigo preservado
+fora do repositório.
+
+### D8 — Colunas Seguro/IPI e Alíquota (2026-07-06)
+- Coluna T = "SEGURO/DESP. ACESS." (vSeg + vOutro, rateio proporcional quando o valor
+  só existe no total da nota)
+- Coluna U = "IPI" (vIPI real do item; antes recebia vOutro por engano histórico)
+- Coluna AP = "ALÍQUOTA DO PRODUTO" (X/W, conferência manual)
+- Dados de competências importadas antes desta data mantêm o formato antigo até
+  reimportação dos XMLs.
+
+---
+
+## Fluxo Mensal (vigente)
+
+1. Operador acessa o app (Railway), página **Importar NF-e**
+2. Seleciona Ano/Mês e arrasta a pasta de XMLs do mês
+3. Sistema classifica cada item pelo cadastro; produtos novos viram **Alertas**
+4. Operador classifica os alertas (com sugestão automática do motor de pré-classificação)
+5. Reimporta/regera a planilha da competência e baixa o .xlsm (trilha Original)
+6. Trilha Ajustada e envio por e-mail: pendentes (ver AGENTS.md → Pendências)
