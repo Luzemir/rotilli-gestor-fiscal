@@ -157,6 +157,46 @@ with st.container(border=True):
                 except sqlite3.IntegrityError:
                     st.error(f'Login `{novo_login.strip().lower()}` já existe.')
 
+    # ── Editar usuário (nome / perfil) ─────────────────────────────────────────
+    with st.expander('✏️ Editar Usuário (nome / perfil)'):
+        conn = get_conn()
+        users_edit = conn.execute(
+            'SELECT id, username, nome, perfil FROM usuarios ORDER BY nome'
+        ).fetchall()
+        conn.close()
+
+        if not users_edit:
+            st.info('Nenhum usuário no banco ainda.')
+        else:
+            mapa_edit = {f'{u["username"]} — {u["nome"]}': u for u in users_edit}
+            sel_edit = st.selectbox('Usuário', list(mapa_edit.keys()), key='edit_user_sel')
+            u_edit = mapa_edit[sel_edit]
+            _perfis = ['Usuário', 'Administrador']
+            with st.form('form_edit_user'):
+                e_nome   = st.text_input('Nome completo', value=u_edit['nome'])
+                e_perfil = st.selectbox(
+                    'Perfil', _perfis,
+                    index=_perfis.index(u_edit['perfil']) if u_edit['perfil'] in _perfis else 0,
+                )
+                salvar_edit = st.form_submit_button('Salvar alterações', type='primary', use_container_width=True)
+
+            if salvar_edit:
+                nome_val = (e_nome or '').strip()
+                if not nome_val:
+                    st.error('Nome obrigatório.')
+                elif u_edit['username'].lower() == user_atual.lower() and e_perfil != 'Administrador':
+                    st.error('Você não pode rebaixar o próprio perfil de Administrador (evita ficar sem admin).')
+                else:
+                    conn = get_conn()
+                    conn.execute(
+                        'UPDATE usuarios SET nome=?, perfil=? WHERE id=?',
+                        (nome_val, e_perfil, u_edit['id']),
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success(f'Usuário **{u_edit["username"]}** atualizado.')
+                    st.rerun()
+
     # ── Redefinir senha ────────────────────────────────────────────────────────
     with st.expander('🔑 Redefinir Senha'):
         conn = get_conn()
