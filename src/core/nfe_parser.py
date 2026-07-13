@@ -76,17 +76,34 @@ def _extrair_icms_origem(det):
     Extrai BC e VLR do ICMS de origem. O nome do sub-elemento de ICMS varia
     por CST/CSOSN (ICMS00, ICMS10, ICMSSN101 etc.) — pega o primeiro (único)
     filho de imposto/ICMS, qualquer que seja o nome, e lê vBC/vICMS dele.
-    Notas do Simples Nacional normalmente não têm esses campos.
+
+    Notas do Simples Nacional com permissão de crédito (ICMSSN101 = CSOSN 101,
+    ICMSSN201 = CSOSN 201) não têm vBC/vICMS; declaram o crédito de ICMS que o
+    destinatário pode aproveitar (art. 23 da LC 123/2006) em vCredICMSSN (valor)
+    e pCredSN (alíquota do crédito, em %). Nesse caso:
+      VLR ICMS (origem) = vCredICMSSN
+      BC  ICMS (origem) = vProd + frete + seguro/desp. acess. - desconto
+
+    Retorna (bc, vlr, compor_base). Quando compor_base=True (nota do Simples com
+    crédito) a BC ainda não está pronta — o chamador a compõe DEPOIS do rateio e
+    da consolidação de seguro+despesas acessórias (ver parsear_xml).
     """
     icms_node = det.find('nfe:imposto/nfe:ICMS', NS)
     if icms_node is None or len(icms_node) == 0:
-        return None, None
+        return None, None, False
     grupo = icms_node[0]
+
     bc = _text(grupo, 'nfe:vBC')
     vicms = _text(grupo, 'nfe:vICMS')
-    bc_val = float(bc) if bc else None
-    vicms_val = float(vicms) if vicms else None
-    return bc_val, vicms_val
+    if bc is not None or vicms is not None:
+        return (float(bc) if bc else None,
+                float(vicms) if vicms else None, False)
+
+    # Simples Nacional com permissão de crédito (CSOSN 101/201)
+    vcred = _text(grupo, 'nfe:vCredICMSSN')
+    if vcred is None:
+        return None, None, False
+    return None, float(vcred), True
 
 
 def _extrair_icms_st_nfe(det):
@@ -173,7 +190,7 @@ def parsear_xml(filepath):
             if prod is None:
                 continue
 
-            bc_icms_origem, vlr_icms_origem = _extrair_icms_origem(det)
+            bc_icms_origem, vlr_icms_origem, compor_base_origem = _extrair_icms_origem(det)
             bc_icms_st_nfe, vlr_icms_st_nfe = _extrair_icms_st_nfe(det)
             vOutro = _numero(prod, 'nfe:vOutro')
 
@@ -203,6 +220,8 @@ def parsear_xml(filepath):
                 'desconto': _numero(prod, 'nfe:vDesc'),
                 'bc_icms_origem': bc_icms_origem,
                 'vlr_icms_origem': vlr_icms_origem,
+                # Nota do Simples com crédito: BC composta após rateio (abaixo)
+                '_compor_base_origem': compor_base_origem,
                 'bc_icms_st_nfe': bc_icms_st_nfe,
                 'vlr_icms_st_nfe': vlr_icms_st_nfe,
                 # Será preenchido depois pelo cruzamento com o BD
@@ -221,6 +240,15 @@ def parsear_xml(filepath):
         # Consolida seguro = seguro + vOutro (possivelmente rateados) — col T "Seguro/Desp. Acess."
         for item in itens:
             item['seguro'] = round((item.get('seguro') or 0.0) + (item.pop('_vOutro') or 0.0), 2)
+            # BC ICMS origem do Simples: composta agora que frete/seguro/desp.
+            # acessórias já foram rateados e consolidados.
+            # BC = vProd + frete + seguro/desp. acess. - desconto
+            if item.pop('_compor_base_origem', False):
+                item['bc_icms_origem'] = round(
+                    float(item.get('valor_total') or 0)
+                    + (item.get('frete') or 0.0)
+                    + (item.get('seguro') or 0.0)
+                    - (item.get('desconto') or 0.0), 2)
 
         return {'cnpj_emitente': cnpj_emitente, 'num_nf': num_nf, 'data_emissao': data_emissao, 'itens': itens}
 

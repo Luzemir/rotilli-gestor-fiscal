@@ -103,6 +103,11 @@ passam pelo app.py), JS que esconde Admin para não-admins e renomeia 'app'→'P
   nem pela data de emissão). Todos os XMLs do lote entram na competência selecionada.
 - **PMC coluna Y** = histórico do produto, NUNCA sobrescrito pela CMED; o valor CMED vai na AN,
   a diferença na AO.
+- **ICMS origem no Simples Nacional** (colunas W/X): notas CSOSN 101 (`ICMSSN101`) e 201
+  (`ICMSSN201`) não têm `vBC`/`vICMS` — declaram o crédito de ICMS aproveitável (art. 23 LC
+  123/2006) em `vCredICMSSN`. `_extrair_icms_origem` mapeia X = `vCredICMSSN` e sinaliza
+  `compor_base_origem`; `parsear_xml` então compõe W = `vProd + frete + seguro/desp. acess. -
+  desconto` (col T já consolidada), **depois** do rateio dos totais da nota.
 
 ### Planilha gerada (aba RegimeEspecial, tabela `tabRegEsp`, A4:AP)
 - Colunas literais A–AC + AN; fórmulas vivas AD–AK, AO, AP (replicadas do Excel histórico)
